@@ -12,6 +12,7 @@
 </head>
 <body>
 <canvas id="c"></canvas>
+
 <script>
 'use strict';
 const cv=document.getElementById('c'),ctx=cv.getContext('2d');
@@ -22,6 +23,7 @@ function resize(){
   W=window.innerWidth;H=window.innerHeight;
   cv.width=Math.round(W*DPR);cv.height=Math.round(H*DPR);
   cv.style.width=W+'px';cv.style.height=H+'px';
+  ctx.setTransform(DPR,0,0,DPR,0,0);
   ctx.imageSmoothingEnabled=true;
   ctx.imageSmoothingQuality='high';
   const g=ctx.createRadialGradient(W/2,H/2,Math.min(W,H)*.36,W/2,H/2,Math.hypot(W,H)*.58);
@@ -146,6 +148,7 @@ function stepCam(dt){
 const TINTS=['#7d9b76','#8b7fa8','#7f96b8','#a8927f','#93ac86','#b09a7c','#a87f92','#7fa39b','#978fb5','#8fa06e'];
 const ASPECTS=[1,4/3,3/2,16/10];
 const cards=[];
+
 {
   let s=0x9e3779b9>>>0;
   const rnd=()=>{s=(s*1664525+1013904223)>>>0;return s/4294967296;};
@@ -153,6 +156,7 @@ const cards=[];
     const iw=Math.round(230+rnd()*290);
     const ih=Math.max(140,Math.round(iw/ASPECTS[(rnd()*ASPECTS.length)|0]));
     const img=new Image();
+    img.crossOrigin='anonymous';
     img.src='https://picsum.photos/seed/squichi-'+i+'/'+iw+'/'+ih;
     const c={x:(rnd()*2-1)*3000-iw/2,y:(rnd()*2-1)*3000-ih/2,w:iw,h:ih,
       img,tint:TINTS[(rnd()*TINTS.length)|0],ok:false};
@@ -162,35 +166,39 @@ const cards=[];
 }
 
 const GRID=120;
-function gridFade(m){return Math.max(.14,.30-.05*Math.min(m,3));}
+function gridFade(m){return Math.max(.025,.12-.03*Math.min(m,3));}
+function snapStroke(v){return (Math.round(v*DPR)+.5)/DPR;}
 function drawGrid(){
   const rx=W*.5*PAD,ry=H*.5*PAD,z=cam.zoom;
   let R=1.3*Math.max(rx,ry)/z+400,gap=GRID;
   if(2*R/gap>260)gap*=Math.ceil((2*R/gap)/260);
+
+  ctx.save();
   ctx.lineWidth=1;
-  const n=Math.max(10,Math.ceil(2*R*z/32)),dw=2*R/n;
+
   for(let wx=Math.ceil((cam.x-R)/gap)*gap;wx<=cam.x+R;wx+=gap){
     const a=gridFade(Math.abs(wx-cam.x)*z/rx);
     if(a<.01)continue;
+    const x=snapStroke(W*.5+axisMap((wx-cam.x)*z,rx));
     ctx.strokeStyle='rgba(76,71,62,'+a.toFixed(3)+')';
     ctx.beginPath();
-    for(let i=0;i<=n;i++){
-      mapPoint(wx,cam.y-R+i*dw,TMP);
-      i?ctx.lineTo(TMP.x,TMP.y):ctx.moveTo(TMP.x,TMP.y);
-    }
+    ctx.moveTo(x,0);
+    ctx.lineTo(x,H);
     ctx.stroke();
   }
+
   for(let wy=Math.ceil((cam.y-R)/gap)*gap;wy<=cam.y+R;wy+=gap){
     const a=gridFade(Math.abs(wy-cam.y)*z/ry);
     if(a<.01)continue;
+    const y=snapStroke(H*.5+axisMap((wy-cam.y)*z,ry));
     ctx.strokeStyle='rgba(76,71,62,'+a.toFixed(3)+')';
     ctx.beginPath();
-    for(let i=0;i<=n;i++){
-      mapPoint(cam.x-R+i*dw,wy,TMP);
-      i?ctx.lineTo(TMP.x,TMP.y):ctx.moveTo(TMP.x,TMP.y);
-    }
+    ctx.moveTo(0,y);
+    ctx.lineTo(W,y);
     ctx.stroke();
   }
+
+  ctx.restore();
 }
 
 const P=new Float64Array(256),MINW=8,MINH=7;
@@ -219,7 +227,7 @@ function tracePoly(r){
   const fx=Math.min(6,Math.max(1,MINW/Math.max(1e-4,mxx-mnx))),
         fy=Math.min(6,Math.max(1,MINH/Math.max(1e-4,mxy-mny)));
   if(fx>1||fy>1){
-    for(let i=0;i<n;i+=2){P[i]=cx+(P[i]-cx)*fx;P[i+1]=cy+(P[i]-cy)*fy;}
+    for(let i=0;i<n;i+=2){P[i]=cx+(P[i]-cx)*fx;P[i+1]=cy+(P[i+1]-cy)*fy;}
     for(let k=0;k<8;k+=2){CORN[k]=cx+(CORN[k]-cx)*fx;CORN[k+1]=cy+(CORN[k+1]-cy)*fy;}
   }
   ctx.beginPath();ctx.moveTo(P[0],P[1]);
@@ -227,30 +235,22 @@ function tracePoly(r){
   ctx.closePath();
 }
 
-function texTri(x0,y0,x1,y1,x2,y2,u0,v0,u1,v1,u2,v2){
-  const den=(u1-u2)*(v0-v2)-(u0-u2)*(v1-v2);
-  if(!isFinite(den)||Math.abs(den)<1e-8)return;
-  const a=((x1-x2)*(v0-v2)-(x0-x2)*(v1-v2))/den,
-        c=((u1-u2)*(x0-x2)-(u0-u2)*(x1-x2))/den,
-        b=((y1-y2)*(v0-v2)-(y0-y2)*(v1-v2))/den,
-        d=((u1-u2)*(y0-y2)-(u0-u2)*(y1-y2))/den,
-        e=x0-a*u0-c*v0,
-        f=y0-b*u0-d*v0;
-  const gx=(x0+x1+x2)/3,gy=(y0+y1+y2)/3;
-  const inf=(x,y)=>{
-    const dx=x-gx,dy=y-gy,l=Math.hypot(dx,dy)||1;
-    return[x+dx/l*.65,y+dy/l*.65];
-  };
-  const q0=inf(x0,y0),q1=inf(x1,y1),q2=inf(x2,y2);
-  ctx.save();
-  ctx.beginPath();
-  ctx.moveTo(q0[0],q0[1]);ctx.lineTo(q1[0],q1[1]);ctx.lineTo(q2[0],q2[1]);
-  ctx.closePath();ctx.clip();
-  ctx.transform(a,b,c,d,e,f);
-  ctx.drawImage(cardImg,0,0);
-  ctx.restore();
+let cardM=0;
+function anchorBlend(d,c){
+  if(c<=0)return d>=0?1:-1;
+  return Math.max(-1,Math.min(1,d/c));
 }
-let cardImg=null;
+function contentRect(r){
+  const qx1=Math.min(CORN[0],CORN[2],CORN[4],CORN[6]),
+        qx2=Math.max(CORN[0],CORN[2],CORN[4],CORN[6]),
+        qy1=Math.min(CORN[1],CORN[3],CORN[5],CORN[7]),
+        qy2=Math.max(CORN[1],CORN[3],CORN[5],CORN[7]);
+  const bw=r.w*cam.zoom,bh=r.h*cam.zoom;
+  const fx=anchorBlend((qx1+qx2)/2-W/2,W/2*PAD-BAND),
+        fy=anchorBlend((qy1+qy2)/2-H/2,H/2*PAD-BAND);
+  return{x:qx1+(1-fx)/2*((qx2-qx1)-bw),
+         y:qy1+(1-fy)/2*((qy2-qy1)-bh),w:bw,h:bh};
+}
 
 function drawCard(r){
   tracePoly(r);
@@ -261,12 +261,20 @@ function drawCard(r){
   ctx.fillStyle=r.tint;ctx.fill();
   ctx.shadowColor='transparent';ctx.shadowBlur=0;ctx.shadowOffsetY=0;
   if(r.ok&&r.img.naturalWidth>0){
-    cardImg=r.img;
-    const sw=r.img.naturalWidth,sh=r.img.naturalHeight;
-    const x0=CORN[0],y0=CORN[1],x1=CORN[2],y1=CORN[3],
-          x2=CORN[4],y2=CORN[5],x3=CORN[6],y3=CORN[7];
-    texTri(x0,y0,x1,y1,x2,y2, 0,0, sw,0, sw,sh);
-    texTri(x0,y0,x2,y2,x3,y3, 0,0, sw,sh, 0,sh);
+    const cr=contentRect(r);
+    const k=Math.max(cr.w/r.img.naturalWidth,cr.h/r.img.naturalHeight),
+          dw=r.img.naturalWidth*k,dh=r.img.naturalHeight*k;
+    const bleed=2/DPR;
+    ctx.save();
+    ctx.clip();
+    ctx.drawImage(
+      r.img,
+      cr.x+(cr.w-dw)/2-bleed,
+      cr.y+(cr.h-dh)/2-bleed,
+      dw+bleed*2,
+      dh+bleed*2
+    );
+    ctx.restore();
   }
   ctx.globalAlpha=Math.min(1,a+.18);
   ctx.strokeStyle='rgba(56,50,42,.66)';
@@ -284,7 +292,6 @@ function drawCards(){
   ctx.lineJoin='round';
   for(const[m,r]of vis){cardM=m;drawCard(r);}
 }
-let cardM=0;
 
 let last=performance.now();
 function frame(now){
